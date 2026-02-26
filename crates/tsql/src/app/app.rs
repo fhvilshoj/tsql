@@ -2525,16 +2525,7 @@ impl App {
                 (KeyCode::Char('\\') | KeyCode::Char('4'), modifiers)
                     if modifiers.contains(KeyModifiers::CONTROL) =>
                 {
-                    if self.sidebar_visible {
-                        self.sidebar_visible = false;
-                        // If hiding sidebar and focus was on it, move focus to query
-                        if matches!(self.focus, Focus::Sidebar(_)) {
-                            self.focus = Focus::Query;
-                        }
-                    } else {
-                        // When opening the sidebar, jump straight to Schema.
-                        self.focus_schema();
-                    }
+                    self.toggle_sidebar();
                     return false;
                 }
                 // Ctrl+Shift+B: Toggle sidebar
@@ -2543,16 +2534,7 @@ impl App {
                         && (modifiers.contains(KeyModifiers::SHIFT)
                             || matches!(code, KeyCode::Char('B'))) =>
                 {
-                    if self.sidebar_visible {
-                        self.sidebar_visible = false;
-                        // If hiding sidebar and focus was on it, move focus to query
-                        if matches!(self.focus, Focus::Sidebar(_)) {
-                            self.focus = Focus::Query;
-                        }
-                    } else {
-                        // When opening the sidebar, jump straight to Schema.
-                        self.focus_schema();
-                    }
+                    self.toggle_sidebar();
                     return false;
                 }
                 // Ctrl+HJKL: Directional panel navigation
@@ -2586,8 +2568,11 @@ impl App {
                         let result = self.grid_state.handle_key(key, &self.grid);
                         self.maybe_fetch_more_rows();
                         if let GridKeyResult::Yank { text, status } = result {
+                            self.last_error = None;
                             self.copy_to_clipboard(&text);
-                            self.last_status = Some(status);
+                            if self.last_error.is_none() {
+                                self.last_status = Some(status);
+                            }
                         }
                         return false;
                     }
@@ -2613,14 +2598,7 @@ impl App {
                                 GridKeyResult::None
                             }
                             Action::ToggleSidebar => {
-                                if self.sidebar_visible {
-                                    self.sidebar_visible = false;
-                                    if matches!(self.focus, Focus::Sidebar(_)) {
-                                        self.focus = Focus::Query;
-                                    }
-                                } else {
-                                    self.focus_schema();
-                                }
+                                self.toggle_sidebar();
                                 GridKeyResult::None
                             }
                             // Goto navigation (custom keybindings for navigation)
@@ -2673,8 +2651,11 @@ impl App {
                             self.copy_to_clipboard(&text);
                         }
                         GridKeyResult::Yank { text, status } => {
+                            self.last_error = None;
                             self.copy_to_clipboard(&text);
-                            self.last_status = Some(status);
+                            if self.last_error.is_none() {
+                                self.last_status = Some(status);
+                            }
                         }
                         GridKeyResult::ResizeColumn { col, action } => match action {
                             ResizeAction::Widen => self.grid.widen_column(col, 2),
@@ -3188,6 +3169,18 @@ impl App {
         }
     }
 
+    /// Toggle the sidebar: hide it (moving focus to Query if needed) or open it to the Schema section.
+    fn toggle_sidebar(&mut self) {
+        if self.sidebar_visible {
+            self.sidebar_visible = false;
+            if matches!(self.focus, Focus::Sidebar(_)) {
+                self.focus = Focus::Query;
+            }
+        } else {
+            self.focus_schema();
+        }
+    }
+
     /// Focus on the Schema section of the sidebar, ensuring first item is selected
     fn focus_schema(&mut self) {
         self.sidebar_visible = true;
@@ -3380,8 +3373,11 @@ impl App {
                     }
                     YankFormat::Markdown => (self.grid.rows_as_markdown(indices), "Markdown"),
                 };
+                self.last_error = None;
                 self.copy_to_clipboard(&text);
-                self.last_status = Some(format!("Row copied as {label}"));
+                if self.last_error.is_none() {
+                    self.last_status = Some(format!("Row copied as {label}"));
+                }
                 self.row_detail = Some(modal);
             }
         }
@@ -3986,14 +3982,7 @@ impl App {
                 self.open_connection_manager();
             }
             "sbt" | "sidebar-toggle" => {
-                if self.sidebar_visible {
-                    self.sidebar_visible = false;
-                    if matches!(self.focus, Focus::Sidebar(_)) {
-                        self.focus = Focus::Query;
-                    }
-                } else {
-                    self.focus_schema();
-                }
+                self.toggle_sidebar();
             }
             _ => {
                 self.last_status = Some(format!("Unknown command: {}", command));
@@ -4440,14 +4429,7 @@ impl App {
                 self.open_history_picker();
             }
             Action::ToggleSidebar => {
-                if self.sidebar_visible {
-                    self.sidebar_visible = false;
-                    if matches!(self.focus, Focus::Sidebar(_)) {
-                        self.focus = Focus::Query;
-                    }
-                } else {
-                    self.focus_schema();
-                }
+                self.toggle_sidebar();
             }
 
             // Goto navigation (custom keybindings for navigation)
@@ -4959,14 +4941,7 @@ impl App {
                             return;
                         }
                         Action::ToggleSidebar => {
-                            if self.sidebar_visible {
-                                self.sidebar_visible = false;
-                                if matches!(self.focus, Focus::Sidebar(_)) {
-                                    self.focus = Focus::Query;
-                                }
-                            } else {
-                                self.focus_schema();
-                            }
+                            self.toggle_sidebar();
                             return;
                         }
                         _ => {}
@@ -5950,11 +5925,19 @@ impl App {
         terminal.show_cursor()?;
 
         // Resolve editor: $VISUAL > $EDITOR > vi
-        let editor_bin = std::env::var("VISUAL")
+        let editor_str = std::env::var("VISUAL")
             .or_else(|_| std::env::var("EDITOR"))
             .unwrap_or_else(|_| "vi".to_string());
 
-        let spawn_result = std::process::Command::new(&editor_bin).arg(&path).status();
+        // Split to support editors with arguments (e.g. "code -w")
+        let mut editor_parts = editor_str.split_whitespace();
+        let editor_bin = editor_parts.next().unwrap_or("vi");
+        let editor_args: Vec<&str> = editor_parts.collect();
+
+        let spawn_result = std::process::Command::new(editor_bin)
+            .args(&editor_args)
+            .arg(&path)
+            .status();
 
         // Always re-initialize terminal before handling spawn result
         crossterm::terminal::enable_raw_mode()?;
@@ -5971,16 +5954,16 @@ impl App {
                 let content = std::fs::read_to_string(&path)?;
                 let content = content.trim_end_matches('\n').to_string();
                 self.editor.set_text(content);
-                self.last_status = Some(format!("Loaded from {}", editor_bin));
+                self.last_status = Some(format!("Loaded from {}", editor_str));
             }
             Ok(status) => {
                 self.last_error = Some(format!(
                     "Editor '{}' exited with status {}",
-                    editor_bin, status
+                    editor_str, status
                 ));
             }
             Err(e) => {
-                self.last_error = Some(format!("Failed to launch '{}': {}", editor_bin, e));
+                self.last_error = Some(format!("Failed to launch '{}': {}", editor_str, e));
             }
         }
 
@@ -6880,7 +6863,7 @@ impl App {
             })
             .with_prefix(|entry| {
                 if entry.pinned {
-                    Some(("* ", Style::default().fg(Color::Magenta)))
+                    Some(("★ ", Style::default().fg(Color::Magenta)))
                 } else {
                     None
                 }

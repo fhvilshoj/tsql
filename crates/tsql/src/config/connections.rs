@@ -368,16 +368,31 @@ impl ConnectionEntry {
         }
     }
 
-    /// Get the password using the configured method (keychain, env var, or None)
-    pub fn get_password(&self) -> Result<Option<String>> {
-        // Try keychain first if configured
-        if self.password_in_keychain {
-            if let Ok(Some(pwd)) = self.get_password_from_keychain() {
-                return Ok(Some(pwd));
-            }
+    /// Invoke the 1Password CLI to read a secret reference.
+    ///
+    /// Uses `/bin/sh -c` to inherit the user's `PATH` and active `op` session token.
+    /// Returns `Some(password)` on success, `None` if the CLI is unavailable or fails.
+    ///
+    /// Note: this method is Unix-only (`/bin/sh`).
+    fn read_from_onepassword(op_ref: &str) -> Option<String> {
+        let cmd = format!("op read '{}'", op_ref.replace('\'', "'\\''"));
+        let out = std::process::Command::new("/bin/sh")
+            .args(["-c", &cmd])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .ok()?;
+        if out.status.success() {
+            Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+        } else {
+            None
         }
+    }
 
-        // Try environment variable
+    /// Get the password using the configured method.
+    ///
+    /// Precedence: environment variable → 1Password CLI → OS keychain.
+    pub fn get_password(&self) -> Result<Option<String>> {
+        // Try environment variable first (non-blocking)
         if let Some(ref env_var) = self.password_env {
             // Handle both "$VAR" and "VAR" formats
             let var_name = env_var.strip_prefix('$').unwrap_or(env_var);
@@ -386,18 +401,17 @@ impl ConnectionEntry {
             }
         }
 
-        // Try 1Password CLI (via shell to inherit PATH and op session)
+        // Try 1Password CLI if configured
         if let Some(ref op_ref) = self.password_onepassword {
-            let cmd = format!("op read '{}'", op_ref.replace('\'', "'\\''"));
-            if let Ok(out) = std::process::Command::new("/bin/sh")
-                .args(["-c", &cmd])
-                .stdin(std::process::Stdio::null())
-                .output()
-            {
-                if out.status.success() {
-                    let pwd = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                    return Ok(Some(pwd));
-                }
+            if let Some(pwd) = Self::read_from_onepassword(op_ref) {
+                return Ok(Some(pwd));
+            }
+        }
+
+        // Try OS keychain if configured
+        if self.password_in_keychain {
+            if let Ok(Some(pwd)) = self.get_password_from_keychain() {
+                return Ok(Some(pwd));
             }
         }
 
@@ -441,19 +455,10 @@ impl ConnectionEntry {
 
         thread::spawn(move || {
             let result = (|| -> Result<Option<String>> {
-                // Try 1Password CLI first if configured (via shell to
-                // inherit PATH and op session tokens)
+                // Try 1Password CLI first if configured
                 if let Some(ref op_ref) = op_ref {
-                    let cmd = format!("op read '{}'", op_ref.replace('\'', "'\\''"));
-                    if let Ok(out) = std::process::Command::new("/bin/sh")
-                        .args(["-c", &cmd])
-                        .stdin(std::process::Stdio::null())
-                        .output()
-                    {
-                        if out.status.success() {
-                            let pwd = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                            return Ok(Some(pwd));
-                        }
+                    if let Some(pwd) = Self::read_from_onepassword(op_ref) {
+                        return Ok(Some(pwd));
                     }
                 }
 
