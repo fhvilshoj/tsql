@@ -362,15 +362,20 @@ impl HelpPopup {
     /// Recalculate `total_lines` based on the current filter and reset scroll.
     fn recompute_total_lines_and_reset(&mut self) {
         let filtered = self.filtered_sections();
-        let n = filtered.len();
-        self.total_lines = filtered
-            .iter()
-            .enumerate()
-            .map(|(i, (_, bindings))| {
-                // header + separator + bindings + optional blank line
-                2 + bindings.len() + usize::from(i < n.saturating_sub(1))
-            })
-            .sum();
+        if filtered.is_empty() {
+            // render_content emits a single "No results" line when the filter matches nothing
+            self.total_lines = 1;
+        } else {
+            let n = filtered.len();
+            self.total_lines = filtered
+                .iter()
+                .enumerate()
+                .map(|(i, (_, bindings))| {
+                    // header + separator + bindings + optional blank line
+                    2 + bindings.len() + usize::from(i < n.saturating_sub(1))
+                })
+                .sum();
+        }
         self.scroll_offset = 0;
     }
 

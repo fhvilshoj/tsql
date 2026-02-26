@@ -630,4 +630,70 @@ mod tests {
         assert_eq!(truncate_for_display("hello world", 8), "hello w…");
         assert_eq!(truncate_for_display("hi", 2), "hi");
     }
+
+    #[test]
+    fn test_yank_chord_tsv() {
+        let mut modal = create_test_modal();
+
+        // First key 'y' enters pending mode
+        let y = KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE);
+        assert_eq!(modal.handle_key(y), RowDetailAction::Continue);
+        assert!(modal.pending_yank);
+
+        // Second key 'y' yields TSV yank
+        let result = modal.handle_key(y);
+        assert_eq!(result, RowDetailAction::Yank(YankFormat::Tsv));
+        assert!(!modal.pending_yank);
+    }
+
+    #[test]
+    fn test_yank_chord_json() {
+        let mut modal = create_test_modal();
+
+        let y = KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE);
+        modal.handle_key(y);
+
+        let j = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
+        assert_eq!(modal.handle_key(j), RowDetailAction::Yank(YankFormat::Json));
+        assert!(!modal.pending_yank);
+    }
+
+    #[test]
+    fn test_yank_chord_csv() {
+        let mut modal = create_test_modal();
+
+        let y = KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE);
+        modal.handle_key(y);
+
+        let c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE);
+        assert_eq!(modal.handle_key(c), RowDetailAction::Yank(YankFormat::Csv));
+    }
+
+    #[test]
+    fn test_yank_chord_markdown() {
+        let mut modal = create_test_modal();
+
+        let y = KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE);
+        modal.handle_key(y);
+
+        let m = KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE);
+        assert_eq!(
+            modal.handle_key(m),
+            RowDetailAction::Yank(YankFormat::Markdown)
+        );
+    }
+
+    #[test]
+    fn test_yank_chord_unknown_key_cancels() {
+        let mut modal = create_test_modal();
+
+        let y = KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE);
+        modal.handle_key(y);
+        assert!(modal.pending_yank);
+
+        // Unknown second key cancels the pending yank without producing output
+        let x = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE);
+        assert_eq!(modal.handle_key(x), RowDetailAction::Continue);
+        assert!(!modal.pending_yank);
+    }
 }

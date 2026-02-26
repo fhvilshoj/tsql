@@ -156,7 +156,7 @@ impl<T: Clone> FuzzyPicker<T> {
 
     /// Replace the current query and re-filter (used to restore state after a picker rebuild).
     pub fn set_query(&mut self, query: String) {
-        self.cursor = query.len();
+        self.cursor = query.chars().count();
         self.query = query;
         self.update_filtered();
     }
@@ -363,11 +363,19 @@ impl<T: Clone> FuzzyPicker<T> {
         let max_width = (area.width as usize * 80 / 100).clamp(40, 100) as u16;
         let max_height = (area.height as usize * 70 / 100).clamp(10, 30) as u16;
 
-        // Calculate actual width needed.
+        // Calculate actual width needed (include prefix width when prefix_fn is set).
         let content_width = self
             .filtered
             .iter()
-            .map(|item| (self.display_fn)(&item.item).len())
+            .map(|item| {
+                let base = (self.display_fn)(&item.item).len();
+                let prefix_len = self
+                    .prefix_fn
+                    .and_then(|f| f(&item.item))
+                    .map(|(s, _)| s.len())
+                    .unwrap_or(0);
+                base + prefix_len
+            })
             .max()
             .unwrap_or(20)
             .max(self.title.len())

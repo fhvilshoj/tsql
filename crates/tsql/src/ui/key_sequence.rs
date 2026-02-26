@@ -336,6 +336,21 @@ mod tests {
     }
 
     #[test]
+    fn test_g_sequence_gh() {
+        let mut handler = KeySequenceHandler::new(500);
+
+        handler.process_first_key('g');
+        let result = handler.process_second_key('h');
+        assert_eq!(
+            result,
+            KeySequenceResult::Completed(KeySequenceCompletion {
+                action: KeySequenceAction::GotoHistory,
+                context: None
+            })
+        );
+    }
+
+    #[test]
     fn test_cancelled_sequence() {
         let mut handler = KeySequenceHandler::new(500);
 

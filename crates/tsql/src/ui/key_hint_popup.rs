@@ -224,7 +224,8 @@ mod tests {
 
         // Should have reasonable size
         assert!(area.width >= 15);
-        assert!(area.height == 8); // 6 hints + 2 borders
+        let expected_height = (popup.hints().len() as u16) + 2; // hints + top/bottom borders
+        assert_eq!(area.height, expected_height);
     }
 
     #[test]

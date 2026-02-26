@@ -294,6 +294,7 @@ impl ConnectionFormModal {
             return !self.name.is_empty()
                 || !self.user.is_empty()
                 || !self.password.is_empty()
+                || !self.op_ref.is_empty()
                 || !self.database.is_empty()
                 || self.host != "localhost"
                 || self.port != "5432"
