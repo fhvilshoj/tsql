@@ -294,13 +294,13 @@ impl ConnectionFormModal {
             color: entry.color,
             url_paste: String::new(),
 
-            name_cursor: entry.name.len(),
-            host_cursor: entry.host.len(),
-            port_cursor: entry.port.to_string().len(),
-            database_cursor: entry.database.len(),
-            user_cursor: entry.user.len(),
-            password_cursor: password.len(),
-            op_ref_cursor: op_ref.len(),
+            name_cursor: entry.name.chars().count(),
+            host_cursor: entry.host.chars().count(),
+            port_cursor: entry.port.to_string().chars().count(),
+            database_cursor: entry.database.chars().count(),
+            user_cursor: entry.user.chars().count(),
+            password_cursor: password.chars().count(),
+            op_ref_cursor: op_ref.chars().count(),
             url_paste_cursor: 0,
 
             focused: FormField::Name,
@@ -572,6 +572,16 @@ impl ConnectionFormModal {
         }
     }
 
+    fn char_count(text: &str) -> usize {
+        text.chars().count()
+    }
+
+    fn char_to_byte_index(text: &str, char_index: usize) -> usize {
+        text.char_indices()
+            .nth(char_index)
+            .map_or(text.len(), |(idx, _)| idx)
+    }
+
     fn insert_char(&mut self, c: char) {
         // For port field, only allow digits
         if self.focused == FormField::Port && !c.is_ascii_digit() {
@@ -579,24 +589,34 @@ impl ConnectionFormModal {
         }
 
         if let Some((field, cursor)) = self.get_current_field_and_cursor() {
-            field.insert(*cursor, c);
+            let char_count = Self::char_count(field);
+            *cursor = (*cursor).min(char_count);
+            let byte_index = Self::char_to_byte_index(field, *cursor);
+            field.insert(byte_index, c);
             *cursor += 1;
         }
     }
 
     fn delete_char_before(&mut self) {
         if let Some((field, cursor)) = self.get_current_field_and_cursor() {
+            let char_count = Self::char_count(field);
+            *cursor = (*cursor).min(char_count);
             if *cursor > 0 {
-                *cursor -= 1;
-                field.remove(*cursor);
+                let remove_char_idx = *cursor - 1;
+                let remove_byte_idx = Self::char_to_byte_index(field, remove_char_idx);
+                field.remove(remove_byte_idx);
+                *cursor = remove_char_idx;
             }
         }
     }
 
     fn delete_char_at(&mut self) {
         if let Some((field, cursor)) = self.get_current_field_and_cursor() {
-            if *cursor < field.len() {
-                field.remove(*cursor);
+            let char_count = Self::char_count(field);
+            *cursor = (*cursor).min(char_count);
+            if *cursor < char_count {
+                let remove_byte_idx = Self::char_to_byte_index(field, *cursor);
+                field.remove(remove_byte_idx);
             }
         }
     }
@@ -611,7 +631,7 @@ impl ConnectionFormModal {
 
     fn move_cursor_right(&mut self) {
         if let Some((field, cursor)) = self.get_current_field_and_cursor() {
-            if *cursor < field.len() {
+            if *cursor < Self::char_count(field) {
                 *cursor += 1;
             }
         }
@@ -625,7 +645,7 @@ impl ConnectionFormModal {
 
     fn move_cursor_end(&mut self) {
         if let Some((field, cursor)) = self.get_current_field_and_cursor() {
-            *cursor = field.len();
+            *cursor = Self::char_count(field);
         }
     }
 
@@ -655,13 +675,13 @@ impl ConnectionFormModal {
                 self.mongo_uri = None;
                 if self.port.is_empty() || self.port == "27017" {
                     self.port = "5432".to_string();
-                    self.port_cursor = self.port.len();
+                    self.port_cursor = Self::char_count(&self.port);
                 }
             }
             DbKind::Mongo => {
                 if self.port.is_empty() || self.port == "5432" {
                     self.port = "27017".to_string();
-                    self.port_cursor = self.port.len();
+                    self.port_cursor = Self::char_count(&self.port);
                 }
                 self.mongo_uri = Some(self.build_mongo_uri(None));
             }
@@ -813,14 +833,14 @@ impl ConnectionFormModal {
 
                 if let Some(pwd) = password {
                     self.password = pwd;
-                    self.password_cursor = self.password.len();
+                    self.password_cursor = Self::char_count(&self.password);
                 }
 
                 // Update cursors
-                self.host_cursor = self.host.len();
-                self.port_cursor = self.port.len();
-                self.database_cursor = self.database.len();
-                self.user_cursor = self.user.len();
+                self.host_cursor = Self::char_count(&self.host);
+                self.port_cursor = Self::char_count(&self.port);
+                self.database_cursor = Self::char_count(&self.database);
+                self.user_cursor = Self::char_count(&self.user);
 
                 // Clear URL paste field
                 self.url_paste.clear();
@@ -1143,7 +1163,7 @@ impl ConnectionFormModal {
         frame.render_widget(label_widget, chunks[0]);
 
         // Masked value with cursor
-        let masked: String = "•".repeat(self.password.len());
+        let masked: String = "•".repeat(self.password.chars().count());
         let value_spans = if is_focused {
             self.render_text_with_cursor(&masked, self.password_cursor)
         } else {
@@ -1452,6 +1472,21 @@ mod tests {
     }
 
     #[test]
+    fn test_edit_form_initializes_unicode_cursor_by_character_count() {
+        let entry = ConnectionEntry {
+            name: "db—prod".to_string(),
+            host: "localhost".to_string(),
+            port: 5432,
+            database: "mydb".to_string(),
+            user: "admin".to_string(),
+            ..Default::default()
+        };
+
+        let form = ConnectionFormModal::edit(&entry, None);
+        assert_eq!(form.name_cursor, entry.name.chars().count());
+    }
+
+    #[test]
     fn test_tab_navigation() {
         let mut form = ConnectionFormModal::new();
         assert_eq!(form.focused, FormField::Name);
@@ -1529,6 +1564,33 @@ mod tests {
 
         assert_eq!(form.name, "test");
         assert_eq!(form.name_cursor, 4);
+    }
+
+    #[test]
+    fn test_unicode_input_and_editing_uses_char_indices() {
+        let mut form = ConnectionFormModal::new();
+        form.name.clear();
+        form.name_cursor = 0;
+
+        form.handle_key(KeyEvent::new(KeyCode::Char('—'), KeyModifiers::NONE));
+        assert_eq!(form.name, "—");
+        assert_eq!(form.name_cursor, 1);
+
+        // This used to panic because cursor position was treated as a byte offset.
+        form.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+        assert_eq!(form.name, "—a");
+        assert_eq!(form.name_cursor, 2);
+
+        form.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+        assert_eq!(form.name_cursor, 1);
+
+        form.handle_key(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE));
+        assert_eq!(form.name, "—");
+        assert_eq!(form.name_cursor, 1);
+
+        form.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+        assert_eq!(form.name, "");
+        assert_eq!(form.name_cursor, 0);
     }
 
     #[test]
