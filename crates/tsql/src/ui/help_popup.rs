@@ -141,6 +141,7 @@ const QUERY_EDITING: HelpSection = HelpSection::new(
         KeyBinding::new("I/A", "Insert at line start/end"),
         KeyBinding::new("o/O", "Open line below/above"),
         KeyBinding::new("x/X", "Delete char forward/backward"),
+        KeyBinding::new("r<char>", "Replace char under cursor"),
         KeyBinding::new("dd/cc", "Delete/change entire line"),
         KeyBinding::new("dw/cw", "Delete/change word"),
         KeyBinding::new("D/C", "Delete/change to end of line"),

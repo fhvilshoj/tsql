@@ -6502,6 +6502,20 @@ impl App {
                 if let Some(pending) = self.pending_key {
                     self.pending_key = None;
                     match (pending, key.code, key.modifiers) {
+                        // r<char> - replace character under cursor
+                        ('r', KeyCode::Char(c), modifiers)
+                            if !modifiers.contains(KeyModifiers::CONTROL)
+                                && !modifiers.contains(KeyModifiers::ALT) =>
+                        {
+                            if !self.editor.replace_char_under_cursor(c) {
+                                self.last_status = Some("No character to replace".to_string());
+                            }
+                            return;
+                        }
+                        // r<Esc> - cancel replace
+                        ('r', KeyCode::Esc, KeyModifiers::NONE) => {
+                            return;
+                        }
                         // gg - go to top
                         ('g', KeyCode::Char('g'), KeyModifiers::NONE) => {
                             self.editor.textarea.move_cursor(CursorMove::Top);
@@ -6683,6 +6697,9 @@ impl App {
                     }
                     (KeyCode::Char('c'), KeyModifiers::NONE) => {
                         self.pending_key = Some('c');
+                    }
+                    (KeyCode::Char('r'), KeyModifiers::NONE) => {
+                        self.pending_key = Some('r');
                     }
                     (KeyCode::Char('G'), KeyModifiers::SHIFT)
                     | (KeyCode::Char('G'), KeyModifiers::NONE) => {
@@ -11069,6 +11086,90 @@ mod tests {
         assert_eq!(app.mode, Mode::Normal);
         assert_eq!(app.pending_key, None);
         assert!(app.pending_external_edit);
+    }
+
+    #[test]
+    fn test_r_replaces_char_under_cursor_in_normal_mode() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let mut app = App::new(GridModel::empty(), rt.handle().clone(), tx, rx, None);
+        app.connection_picker = None;
+        app.connection_manager = None;
+        app.focus = Focus::Query;
+        app.mode = Mode::Normal;
+        app.editor.set_text("hello".to_string());
+        app.editor.textarea.move_cursor(CursorMove::Head);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+        assert_eq!(app.pending_key, Some('r'));
+
+        app.on_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+        assert_eq!(app.editor.text(), "xello");
+        assert_eq!(app.mode, Mode::Normal);
+        assert_eq!(app.pending_key, None);
+    }
+
+    #[test]
+    fn test_r_then_esc_cancels_replace() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let mut app = App::new(GridModel::empty(), rt.handle().clone(), tx, rx, None);
+        app.connection_picker = None;
+        app.connection_manager = None;
+        app.focus = Focus::Query;
+        app.mode = Mode::Normal;
+        app.editor.set_text("hello".to_string());
+        app.editor.textarea.move_cursor(CursorMove::Head);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+        assert_eq!(app.pending_key, Some('r'));
+
+        app.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(app.editor.text(), "hello");
+        assert_eq!(app.pending_key, None);
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn test_r_at_end_of_line_reports_no_character_to_replace() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let mut app = App::new(GridModel::empty(), rt.handle().clone(), tx, rx, None);
+        app.connection_picker = None;
+        app.connection_manager = None;
+        app.focus = Focus::Query;
+        app.mode = Mode::Normal;
+        app.editor.set_text("hello".to_string());
+        app.editor.textarea.move_cursor(CursorMove::End);
+
+        app.on_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+        app.on_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+
+        assert_eq!(app.editor.text(), "hello");
+        assert_eq!(app.last_status.as_deref(), Some("No character to replace"));
+    }
+
+    #[test]
+    fn test_ctrl_r_binding_exists_in_editor_normal_keymap() {
+        let keymap = crate::config::Keymap::default_editor_normal_keymap();
+        let ctrl_r = KeyBinding::new(KeyCode::Char('r'), KeyModifiers::CONTROL);
+        assert_eq!(
+            keymap.get(&ctrl_r),
+            Some(&Action::ShowHistory),
+            "Ctrl+R should remain bound to history search in normal mode"
+        );
     }
 
     #[test]

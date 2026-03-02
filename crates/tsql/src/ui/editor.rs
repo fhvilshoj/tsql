@@ -243,6 +243,26 @@ impl QueryEditor {
             Some(text)
         }
     }
+
+    /// Replace the character under the cursor (vim `r<char>` behavior).
+    /// Returns false when there is no character under the cursor.
+    pub fn replace_char_under_cursor(&mut self, c: char) -> bool {
+        let (row, col) = self.textarea.cursor();
+        let lines = self.textarea.lines();
+        if row >= lines.len() {
+            return false;
+        }
+
+        let line_char_len = lines[row].chars().count();
+        if col >= line_char_len {
+            return false;
+        }
+
+        self.textarea.delete_next_char();
+        self.textarea.insert_char(c);
+        self.textarea.move_cursor(CursorMove::Back);
+        true
+    }
 }
 
 impl Default for QueryEditor {
@@ -311,6 +331,45 @@ mod tests {
 
         assert!(result.is_some());
         assert_eq!(result.unwrap(), "selected text");
+    }
+
+    #[test]
+    fn test_replace_char_under_cursor_replaces_single_char() {
+        let mut editor = QueryEditor::new();
+        editor.set_text("hello".to_string());
+        editor.textarea.move_cursor(CursorMove::Head);
+
+        let replaced = editor.replace_char_under_cursor('x');
+
+        assert!(replaced);
+        assert_eq!(editor.text(), "xello");
+        assert_eq!(editor.textarea.cursor(), (0, 0));
+    }
+
+    #[test]
+    fn test_replace_char_under_cursor_returns_false_at_end_of_line() {
+        let mut editor = QueryEditor::new();
+        editor.set_text("hello".to_string());
+        editor.textarea.move_cursor(CursorMove::End);
+
+        let replaced = editor.replace_char_under_cursor('x');
+
+        assert!(!replaced);
+        assert_eq!(editor.text(), "hello");
+    }
+
+    #[test]
+    fn test_replace_char_under_cursor_handles_unicode() {
+        let mut editor = QueryEditor::new();
+        editor.set_text("héllo".to_string());
+        editor.textarea.move_cursor(CursorMove::Head);
+        editor.textarea.move_cursor(CursorMove::Forward); // on 'é'
+
+        let replaced = editor.replace_char_under_cursor('ø');
+
+        assert!(replaced);
+        assert_eq!(editor.text(), "høllo");
+        assert_eq!(editor.textarea.cursor(), (0, 1));
     }
 
     // ========== Change Tracking Tests ==========
