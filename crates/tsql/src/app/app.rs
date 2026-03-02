@@ -602,6 +602,22 @@ fn is_pageable_query(query: &str) -> bool {
     extract_table_from_query(query).is_some()
 }
 
+fn is_row_returning_query(query: &str) -> bool {
+    let trimmed = query.trim_start();
+    let first = trimmed
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .trim_matches('(');
+
+    first.eq_ignore_ascii_case("select")
+        || first.eq_ignore_ascii_case("with")
+        || first.eq_ignore_ascii_case("values")
+        || first.eq_ignore_ascii_case("table")
+        || first.eq_ignore_ascii_case("show")
+        || first.eq_ignore_ascii_case("explain")
+}
+
 fn compute_query_panel_height(
     main_height: u16,
     mode: Mode,
@@ -8460,7 +8476,12 @@ impl App {
                     headers
                 },
                 rows: if first_page_rows.is_empty() {
-                    vec![vec!["OK".to_string()]]
+                    let status = if is_row_returning_query(&query) {
+                        "No rows".to_string()
+                    } else {
+                        "OK".to_string()
+                    };
+                    vec![vec![status]]
                 } else {
                     first_page_rows
                 },
@@ -8653,7 +8674,13 @@ impl App {
                     }
 
                     let (headers, rows) = if last_headers.is_empty() {
-                        let status = last_cmd.clone().unwrap_or_else(|| "OK".to_string());
+                        let status = if last_cmd.as_deref() == Some("0 rows")
+                            && is_row_returning_query(&query)
+                        {
+                            "No rows".to_string()
+                        } else {
+                            last_cmd.clone().unwrap_or_else(|| "OK".to_string())
+                        };
                         (vec!["status".to_string()], vec![vec![status]])
                     } else {
                         (last_headers, last_rows)
@@ -12916,6 +12943,30 @@ mod tests {
     fn test_is_pageable_query_empty() {
         assert!(!is_pageable_query(""));
         assert!(!is_pageable_query("   "));
+    }
+
+    #[test]
+    fn test_is_row_returning_query_detects_select_like_statements() {
+        assert!(is_row_returning_query("SELECT * FROM users"));
+        assert!(is_row_returning_query(
+            "with cte as (select 1) select * from cte"
+        ));
+        assert!(is_row_returning_query("VALUES (1), (2)"));
+        assert!(is_row_returning_query("TABLE users"));
+        assert!(is_row_returning_query("SHOW search_path"));
+        assert!(is_row_returning_query("EXPLAIN SELECT 1"));
+    }
+
+    #[test]
+    fn test_is_row_returning_query_rejects_non_row_statements() {
+        assert!(!is_row_returning_query("UPDATE users SET name = 'x'"));
+        assert!(!is_row_returning_query(
+            "INSERT INTO users (name) VALUES ('x')"
+        ));
+        assert!(!is_row_returning_query("DELETE FROM users"));
+        assert!(!is_row_returning_query("CREATE TABLE t (id int)"));
+        assert!(!is_row_returning_query(""));
+        assert!(!is_row_returning_query("   "));
     }
 
     // ========== resolve_ssl_mode tests ==========
